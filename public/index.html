@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lumina AI</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+    body { display: flex; height: 100vh; background-color: #212121; color: #ececec; overflow: hidden; }
+
+    /* Sidebar */
+    .sidebar { width: 260px; background-color: #171717; display: flex; flex-direction: column; padding: 10px; border-right: 1px solid #2f2f2f; }
+    .new-chat-btn { display: flex; align-items: center; gap: 10px; background: transparent; border: 1px solid #424242; color: #fff; padding: 10px 14px; border-radius: 8px; cursor: pointer; font-weight: 500; transition: 0.2s; }
+    .new-chat-btn:hover { background-color: #212121; }
+    .history-title { font-size: 11px; color: #8e8e8e; margin: 15px 10px 8px; font-weight: 600; text-transform: uppercase; }
+    .history-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
+    .history-item { display: flex; align-items: center; justify-content: space-between; padding: 10px; border-radius: 8px; cursor: pointer; color: #cccccc; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; overflow: hidden; }
+    .history-item:hover, .history-item.active { background-color: #212121; color: #fff; }
+    .delete-btn { color: #8e8e8e; display: none; }
+    .history-item:hover .delete-btn { display: block; }
+
+    /* Main Area */
+    .main-container { flex: 1; display: flex; flex-direction: column; height: 100vh; background-color: #212121; }
+    .header { padding: 16px; font-size: 18px; font-weight: 600; text-align: center; border-bottom: 1px solid #2f2f2f; color: #10a37f; }
+    .chat-box { flex: 1; overflow-y: auto; padding: 20px 15%; display: flex; flex-direction: column; gap: 20px; }
+    .message-row { display: flex; gap: 16px; line-height: 1.6; }
+    .avatar { width: 32px; height: 32px; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-weight: bold; flex-shrink: 0; }
+    .user-avatar { background-color: #5436da; color: #fff; }
+    .bot-avatar { background-color: #10a37f; color: #fff; }
+    .message-content { flex: 1; word-break: break-word; white-space: pre-wrap; font-size: 15px; margin-top: 3px; }
+
+    /* Input Box */
+    .input-container { padding: 20px 15%; background: #212121; border-top: 1px solid #2f2f2f; }
+    .input-wrapper { display: flex; align-items: center; background-color: #2f2f2f; border-radius: 12px; padding: 8px 16px; border: 1px solid #424242; }
+    textarea { flex: 1; background: transparent; border: none; color: #fff; outline: none; resize: none; font-size: 15px; max-height: 150px; }
+    .send-btn { background: #10a37f; border: none; color: white; width: 32px; height: 32px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center; margin-left: 8px; }
+    .send-btn:hover { background: #1a7f64; }
+  </style>
+</head>
+<body>
+
+  <!-- Sidebar -->
+  <div class="sidebar">
+    <button class="new-chat-btn" onclick="createNewChat()">
+      <i class="fa-solid fa-plus"></i> New chat
+    </button>
+    <div class="history-title">Recent Conversations</div>
+    <div class="history-list" id="historyList"></div>
+  </div>
+
+  <!-- Main Chat -->
+  <div class="main-container">
+    <div class="header">Lumina AI</div>
+    <div class="chat-box" id="chatBox"></div>
+    <div class="input-container">
+      <div class="input-wrapper">
+        <textarea id="userInput" rows="1" placeholder="Message Lumina..." onkeydown="handleKeyDown(event)"></textarea>
+        <button class="send-btn" onclick="sendMessage()"><i class="fa-solid fa-paper-plane"></i></button>
+      </div>
+    </div>
+  </div>
+
+<script>
+  let sessions = JSON.parse(localStorage.getItem("lumina_chats") || "[]");
+  let currentSessionId = localStorage.getItem("lumina_active_id") || null;
+
+  function init() {
+    if (sessions.length === 0 || !currentSessionId) {
+      createNewChat();
+    } else {
+      renderSidebar();
+      renderChat();
+    }
+  }
+
+  function save() {
+    localStorage.setItem("lumina_chats", JSON.stringify(sessions));
+    localStorage.setItem("lumina_active_id", currentSessionId);
+  }
+
+  function createNewChat() {
+    const newSession = {
+      id: Date.now().toString(),
+      title: "New Conversation",
+      messages: [{ sender: "bot", text: "Hello! I am Lumina. How can I assist you today?" }]
+    };
+    sessions.unshift(newSession);
+    currentSessionId = newSession.id;
+    save();
+    renderSidebar();
+    renderChat();
+  }
+
+  function selectChat(id) {
+    currentSessionId = id;
+    save();
+    renderSidebar();
+    renderChat();
+  }
+
+  function deleteChat(e, id) {
+    e.stopPropagation();
+    sessions = sessions.filter(s => s.id !== id);
+    if (currentSessionId === id) {
+      currentSessionId = sessions.length > 0 ? sessions[0].id : null;
+    }
+    if (!currentSessionId) {
+      createNewChat();
+    } else {
+      save();
+      renderSidebar();
+      renderChat();
+    }
+  }
+
+  function getCurrentSession() {
+    return sessions.find(s => s.id === currentSessionId);
+  }
+
+  function renderSidebar() {
+    const list = document.getElementById("historyList");
+    list.innerHTML = "";
+    sessions.forEach(s => {
+      const item = document.createElement("div");
+      item.className = `history-item ${s.id === currentSessionId ? "active" : ""}`;
+      item.onclick = () => selectChat(s.id);
+      item.innerHTML = `
+        <span><i class="fa-regular fa-message" style="margin-right:8px;"></i>${s.title}</span>
+        <i class="fa-solid fa-trash delete-btn" onclick="deleteChat(event, '${s.id}')"></i>
+      `;
+      list.appendChild(item);
+    });
+  }
+
+  function renderChat() {
+    const chatBox = document.getElementById("chatBox");
+    chatBox.innerHTML = "";
+    const session = getCurrentSession();
+    if (!session) return;
+
+    session.messages.forEach(msg => {
+      const row = document.createElement("div");
+      row.className = "message-row";
+      const isUser = msg.sender === "user";
+      row.innerHTML = `
+        <div class="avatar ${isUser ? "user-avatar" : "bot-avatar"}">${isUser ? "U" : "L"}</div>
+        <div class="message-content">${msg.text}</div>
+      `;
+      chatBox.appendChild(row);
+    });
+    chatBox.scrollTop = chatBox.scrollHeight;
+  }
+
+  async function sendMessage() {
+    const input = document.getElementById("userInput");
+    const text = input.value.trim();
+    if (!text) return;
+
+    const session = getCurrentSession();
+    if (session.messages.length === 1 && session.messages[0].sender === "bot") {
+      session.title = text.length > 22 ? text.substring(0, 22) + "..." : text;
+    }
+
+    session.messages.push({ sender: "user", text });
+    input.value = "";
+    renderChat();
+    save();
+    renderSidebar();
+
+    try {
+      const response = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ history: session.messages }),
+      });
+      
+      const data = await response.json();
+
+      if (!response.ok) {
+        session.messages.push({ 
+          sender: "bot", 
+          text: `Error (${response.status}): ${data.error || "Failed to reach Gemini API."}` 
+        });
+      } else {
+        session.messages.push({ 
+          sender: "bot", 
+          text: data.text || "No response received." 
+        });
+      }
+    } catch (err) {
+      session.messages.push({ sender: "bot", text: "Unable to connect to local server." });
+    }
+
+    save();
+    renderChat();
+  }
+
+  function handleKeyDown(e) {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+  }
+
+  init();
+</script>
+</body>
+</html>
