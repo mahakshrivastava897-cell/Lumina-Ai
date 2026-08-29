@@ -8,6 +8,9 @@ const { GoogleGenAI } = require('@google/genai');
 const app = express();
 const port = process.env.PORT || 3000;
 
+// Enable trust proxy for Render reverse proxy HTTPS redirect handling
+app.set('trust proxy', 1);
+
 // Initialize Gemini Client
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
@@ -17,29 +20,33 @@ app.use(express.static('public'));
 app.use(session({
   secret: process.env.SESSION_SECRET || 'lumina_secret_key',
   resave: false,
-  saveUninitialized: false
+  saveUninitialized: false,
+  cookie: {
+    secure: process.env.NODE_ENV === 'production'
+  }
 }));
 
 app.use(passport.initialize());
 app.use(passport.session());
 
-// Student Profile Parser
+// Student Profile Parser Function
 function parseStudentProfile(email) {
   const handle = email.split('@')[0].toLowerCase();
   const currentYear = new Date().getFullYear();
   const currentMonth = new Date().getMonth() + 1; // August = 8
 
-  // Extracts year and branch (e.g., '25' and 'ai' from '25ai1ma80')
+  // Matches 2-digit year followed by branch code (e.g. '25' and 'ai' in '25ai1ma80')
   const match = handle.match(/^(\d{2})([a-z]+)/);
 
   let admissionYear = currentYear;
   let branch = 'GENERAL';
 
   if (match) {
-    admissionYear = 2000 + parseInt(match[1]); // '25' -> 2025
-    branch = match[2].toUpperCase();          // 'ai' -> 'AI'
+    admissionYear = 2000 + parseInt(match[1], 10); // '25' -> 2025
+    branch = match[2].toUpperCase();             // 'ai' -> 'AI'
   }
 
+  // Active Semester & Academic Year Calculation
   const yearDiff = currentYear - admissionYear;
   let semester = yearDiff * 2 + (currentMonth >= 7 ? 1 : 0);
   if (semester < 1) semester = 1;
@@ -50,17 +57,19 @@ function parseStudentProfile(email) {
   return { branch, admissionYear, semester, academicYear };
 }
 
-// Passport Configuration
+// Passport Serialization
 passport.serializeUser((user, done) => done(null, user));
 passport.deserializeUser((obj, done) => done(null, obj));
 
+// Passport Google OAuth Strategy
 passport.use(new GoogleStrategy({
     clientID: process.env.GOOGLE_CLIENT_ID,
     clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-    callbackURL: "/auth/google/callback"
+    callbackURL: "/auth/google/callback",
+    proxy: true
   },
   (accessToken, refreshToken, profile, done) => {
-    const email = profile.emails[0].value;
+    const email = profile.emails && profile.emails[0] ? profile.emails[0].value : '';
     const isMitsEmail = email.endsWith('@mitsgwl.ac.in') || email.endsWith('@mitsgwalior.in');
 
     if (!isMitsEmail) {
@@ -73,7 +82,7 @@ passport.use(new GoogleStrategy({
       id: profile.id,
       displayName: profile.displayName,
       email: email,
-      photo: profile.photos[0]?.value,
+      photo: profile.photos && profile.photos[0] ? profile.photos[0].value : null,
       ...academicInfo
     };
 
@@ -129,4 +138,4 @@ app.post('/api/chat', async (req, res) => {
 
 app.listen(port, () => {
   console.log(`Lumina-Ai server running on port ${port}`);
-});
+}); 
