@@ -11,7 +11,7 @@ const port = process.env.PORT || 3000;
 // Enable trust proxy for Render reverse proxy HTTPS redirect handling
 app.set('trust proxy', 1);
 
-// Initialize Gemini Client
+// Initialize Gemini API Client
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 // Middleware Setup
@@ -29,24 +29,22 @@ app.use(session({
 app.use(passport.initialize());
 app.use(passport.session());
 
-// Student Profile Parser Function
+// Academic Metadata Parser
 function parseStudentProfile(email) {
   const handle = email.split('@')[0].toLowerCase();
   const currentYear = new Date().getFullYear();
-  const currentMonth = new Date().getMonth() + 1; // August = 8
+  const currentMonth = new Date().getMonth() + 1;
 
-  // Matches 2-digit year followed by branch code (e.g. '25' and 'ai' in '25ai1ma80')
   const match = handle.match(/^(\d{2})([a-z]+)/);
 
   let admissionYear = currentYear;
   let branch = 'GENERAL';
 
   if (match) {
-    admissionYear = 2000 + parseInt(match[1], 10); // '25' -> 2025
-    branch = match[2].toUpperCase();             // 'ai' -> 'AI'
+    admissionYear = 2000 + parseInt(match[1], 10);
+    branch = match[2].toUpperCase();
   }
 
-  // Active Semester & Academic Year Calculation
   const yearDiff = currentYear - admissionYear;
   let semester = yearDiff * 2 + (currentMonth >= 7 ? 1 : 0);
   if (semester < 1) semester = 1;
@@ -91,6 +89,14 @@ passport.use(new GoogleStrategy({
   }
 ));
 
+// Root Route Guard - Redirects unauthenticated sessions to Google OAuth
+app.get('/', (req, res, next) => {
+  if (!req.isAuthenticated()) {
+    return res.redirect('/auth/google');
+  }
+  next();
+});
+
 // Authentication Routes
 app.get('/auth/google',
   passport.authenticate('google', { scope: ['profile', 'email'] })
@@ -123,14 +129,13 @@ app.get('/login-failed', (req, res) => {
 // Gemini AI Chat Endpoint
 app.post('/api/chat', async (req, res) => {
   try {
-    // Accepts prompt, message, or contents from frontend payloads
-    const userPrompt = req.body.prompt || req.body.message || req.body.contents;
+    const body = req.body || {};
+    const userPrompt = body.prompt || body.message || body.contents || body.text || body.query || body.input;
 
     if (!userPrompt || typeof userPrompt !== 'string' || !userPrompt.trim()) {
       return res.status(400).json({ error: "Message content cannot be empty." });
     }
 
-    // Personalize prompt instructions using authenticated student session data
     let systemInstruction = "You are Lumina, an intelligent assistant for MITS Gwalior students. Keep answers concise, helpful, and natural.";
     
     if (req.isAuthenticated() && req.user) {
