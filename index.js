@@ -126,11 +126,20 @@ app.get('/login-failed', (req, res) => {
   res.status(403).send('Access Denied: You must sign in with an official MITS account.');
 });
 
-// Gemini AI Chat Endpoint
+// Gemini AI Chat Endpoint (Universal Payload Matching)
 app.post('/api/chat', async (req, res) => {
   try {
     const body = req.body || {};
-    const userPrompt = body.prompt || body.message || body.contents || body.text || body.query || body.input;
+
+    // Check common key names first
+    let userPrompt = body.prompt || body.message || body.contents || body.text || body.query || body.input || body.msg || body.chat;
+
+    // Fallback: search for any non-empty string value in the request body object
+    if (!userPrompt && typeof body === 'object') {
+      userPrompt = Object.values(body).find(val => typeof val === 'string' && val.trim().length > 0);
+    } else if (typeof body === 'string') {
+      userPrompt = body;
+    }
 
     if (!userPrompt || typeof userPrompt !== 'string' || !userPrompt.trim()) {
       return res.status(400).json({ error: "Message content cannot be empty." });
