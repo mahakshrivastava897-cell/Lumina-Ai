@@ -14,9 +14,12 @@ app.set('trust proxy', 1);
 // Initialize Gemini API Client
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
-// Middleware Setup
+// Middleware Setup - Support JSON, Form-encoded, and Raw Text payloads
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+app.use(express.text());
 app.use(express.static('public'));
+
 app.use(session({
   secret: process.env.SESSION_SECRET || 'lumina_secret_key',
   resave: false,
@@ -126,19 +129,20 @@ app.get('/login-failed', (req, res) => {
   res.status(403).send('Access Denied: You must sign in with an official MITS account.');
 });
 
-// Gemini AI Chat Endpoint (Universal Payload Matching)
+// Gemini AI Chat Endpoint (Robust Multi-Format Parsing)
 app.post('/api/chat', async (req, res) => {
   try {
-    const body = req.body || {};
+    let userPrompt = '';
 
-    // Check common key names first
-    let userPrompt = body.prompt || body.message || body.contents || body.text || body.query || body.input || body.msg || body.chat;
-
-    // Fallback: search for any non-empty string value in the request body object
-    if (!userPrompt && typeof body === 'object') {
-      userPrompt = Object.values(body).find(val => typeof val === 'string' && val.trim().length > 0);
-    } else if (typeof body === 'string') {
-      userPrompt = body;
+    if (typeof req.body === 'string') {
+      try {
+        const parsed = JSON.parse(req.body);
+        userPrompt = parsed.prompt || parsed.message || parsed.contents || parsed.text || parsed.query || parsed.input || Object.values(parsed)[0];
+      } catch (e) {
+        userPrompt = req.body;
+      }
+    } else if (typeof req.body === 'object' && req.body !== null) {
+      userPrompt = req.body.prompt || req.body.message || req.body.contents || req.body.text || req.body.query || req.body.input || req.body.msg || req.body.chat || Object.values(req.body).find(val => typeof val === 'string' && val.trim().length > 0);
     }
 
     if (!userPrompt || typeof userPrompt !== 'string' || !userPrompt.trim()) {
