@@ -8,13 +8,13 @@ const { GoogleGenAI } = require('@google/genai');
 const app = express();
 const port = process.env.PORT || 3000;
 
-// Enable trust proxy for Render reverse proxy HTTPS redirect handling
+// Trust Render's reverse proxy for secure HTTPS cookies and redirects
 app.set('trust proxy', 1);
 
-// Initialize Gemini Client
+// Initialize Gemini API Client
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
-// Middleware
+// Middleware Setup
 app.use(express.json());
 app.use(express.static('public'));
 app.use(session({
@@ -29,24 +29,22 @@ app.use(session({
 app.use(passport.initialize());
 app.use(passport.session());
 
-// Student Profile Parser Function
+// Academic Metadata Parser
 function parseStudentProfile(email) {
   const handle = email.split('@')[0].toLowerCase();
   const currentYear = new Date().getFullYear();
-  const currentMonth = new Date().getMonth() + 1; // August = 8
+  const currentMonth = new Date().getMonth() + 1;
 
-  // Matches 2-digit year followed by branch code (e.g. '25' and 'ai' in '25ai1ma80')
   const match = handle.match(/^(\d{2})([a-z]+)/);
 
   let admissionYear = currentYear;
   let branch = 'GENERAL';
 
   if (match) {
-    admissionYear = 2000 + parseInt(match[1], 10); // '25' -> 2025
-    branch = match[2].toUpperCase();             // 'ai' -> 'AI'
+    admissionYear = 2000 + parseInt(match[1], 10);
+    branch = match[2].toUpperCase();
   }
 
-  // Active Semester & Academic Year Calculation
   const yearDiff = currentYear - admissionYear;
   let semester = yearDiff * 2 + (currentMonth >= 7 ? 1 : 0);
   if (semester < 1) semester = 1;
@@ -66,6 +64,7 @@ passport.use(new GoogleStrategy({
     clientID: process.env.GOOGLE_CLIENT_ID,
     clientSecret: process.env.GOOGLE_CLIENT_SECRET,
     callbackURL: "/auth/google/callback",
+    scope: ['profile', 'email'],
     proxy: true
   },
   (accessToken, refreshToken, profile, done) => {
@@ -138,4 +137,4 @@ app.post('/api/chat', async (req, res) => {
 
 app.listen(port, () => {
   console.log(`Lumina-Ai server running on port ${port}`);
-}); 
+});
