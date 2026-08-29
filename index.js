@@ -14,10 +14,9 @@ app.set('trust proxy', 1);
 // Initialize Gemini API Client
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
-// Middleware Setup - Support JSON, Form-encoded, and Raw Text payloads
+// Middleware Setup
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.use(express.text());
 app.use(express.static('public'));
 
 app.use(session({
@@ -129,23 +128,36 @@ app.get('/login-failed', (req, res) => {
   res.status(403).send('Access Denied: You must sign in with an official MITS account.');
 });
 
-// Gemini AI Chat Endpoint (Robust Multi-Format Parsing)
+// Gemini AI Chat Endpoint (Formats history array from frontend)
 app.post('/api/chat', async (req, res) => {
   try {
-    let userPrompt = '';
+    const body = req.body || {};
+    let geminiContents = [];
 
-    if (typeof req.body === 'string') {
-      try {
-        const parsed = JSON.parse(req.body);
-        userPrompt = parsed.prompt || parsed.message || parsed.contents || parsed.text || parsed.query || parsed.input || Object.values(parsed)[0];
-      } catch (e) {
-        userPrompt = req.body;
+    // Parse session history array sent by index.html
+    if (Array.isArray(body.history) && body.history.length > 0) {
+      let historyList = [...body.history];
+      
+      // Strip initial bot welcome greeting so contents start with 'user'
+      if (historyList.length > 0 && historyList[0].sender === 'bot') {
+        historyList.shift();
       }
-    } else if (typeof req.body === 'object' && req.body !== null) {
-      userPrompt = req.body.prompt || req.body.message || req.body.contents || req.body.text || req.body.query || req.body.input || req.body.msg || req.body.chat || Object.values(req.body).find(val => typeof val === 'string' && val.trim().length > 0);
+
+      geminiContents = historyList.map(msg => ({
+        role: msg.sender === 'user' ? 'user' : 'model',
+        parts: [{ text: msg.text }]
+      }));
     }
 
-    if (!userPrompt || typeof userPrompt !== 'string' || !userPrompt.trim()) {
+    // Fallback single prompt parser
+    if (geminiContents.length === 0) {
+      let userPrompt = body.prompt || body.message || body.contents || body.text || body.query;
+      if (userPrompt && typeof userPrompt === 'string' && userPrompt.trim()) {
+        geminiContents = [userPrompt.trim()];
+      }
+    }
+
+    if (geminiContents.length === 0) {
       return res.status(400).json({ error: "Message content cannot be empty." });
     }
 
@@ -157,7 +169,7 @@ app.post('/api/chat', async (req, res) => {
 
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
-      contents: userPrompt,
+      contents: geminiContents,
       config: {
         systemInstruction: systemInstruction
       }
