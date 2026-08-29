@@ -8,10 +8,10 @@ const { GoogleGenAI } = require('@google/genai');
 const app = express();
 const port = process.env.PORT || 3000;
 
-// Trust Render's reverse proxy for secure HTTPS cookies and redirects
+// Enable trust proxy for Render reverse proxy HTTPS redirect handling
 app.set('trust proxy', 1);
 
-// Initialize Gemini API Client
+// Initialize Gemini Client
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 // Middleware Setup
@@ -29,22 +29,24 @@ app.use(session({
 app.use(passport.initialize());
 app.use(passport.session());
 
-// Academic Metadata Parser
+// Student Profile Parser Function
 function parseStudentProfile(email) {
   const handle = email.split('@')[0].toLowerCase();
   const currentYear = new Date().getFullYear();
-  const currentMonth = new Date().getMonth() + 1;
+  const currentMonth = new Date().getMonth() + 1; // August = 8
 
+  // Matches 2-digit year followed by branch code (e.g. '25' and 'ai' in '25ai1ma80')
   const match = handle.match(/^(\d{2})([a-z]+)/);
 
   let admissionYear = currentYear;
   let branch = 'GENERAL';
 
   if (match) {
-    admissionYear = 2000 + parseInt(match[1], 10);
-    branch = match[2].toUpperCase();
+    admissionYear = 2000 + parseInt(match[1], 10); // '25' -> 2025
+    branch = match[2].toUpperCase();             // 'ai' -> 'AI'
   }
 
+  // Active Semester & Academic Year Calculation
   const yearDiff = currentYear - admissionYear;
   let semester = yearDiff * 2 + (currentMonth >= 7 ? 1 : 0);
   if (semester < 1) semester = 1;
@@ -121,16 +123,31 @@ app.get('/login-failed', (req, res) => {
 // Gemini AI Chat Endpoint
 app.post('/api/chat', async (req, res) => {
   try {
-    const { prompt } = req.body;
+    // Accepts prompt, message, or contents from frontend payloads
+    const userPrompt = req.body.prompt || req.body.message || req.body.contents;
+
+    if (!userPrompt || typeof userPrompt !== 'string' || !userPrompt.trim()) {
+      return res.status(400).json({ error: "Message content cannot be empty." });
+    }
+
+    // Personalize prompt instructions using authenticated student session data
+    let systemInstruction = "You are Lumina, an intelligent assistant for MITS Gwalior students. Keep answers concise, helpful, and natural.";
+    
+    if (req.isAuthenticated() && req.user) {
+      systemInstruction += ` You are currently assisting ${req.user.displayName}, a student in the ${req.user.branch} branch (Semester ${req.user.semester}, Academic Year ${req.user.academicYear}).`;
+    }
+
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
-      contents: prompt,
+      contents: userPrompt,
       config: {
-        systemInstruction: "You are Lumina, an intelligent assistant for MITS Gwalior students. Keep answers brief, accurate, and conversational."
+        systemInstruction: systemInstruction
       }
     });
+
     res.json({ text: response.text });
   } catch (error) {
+    console.error("Chat Error:", error);
     res.status(500).json({ error: error.message });
   }
 });
