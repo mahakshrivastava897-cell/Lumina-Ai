@@ -128,7 +128,7 @@ app.get('/login-failed', (req, res) => {
   res.status(403).send('Access Denied: You must sign in with an official MITS account.');
 });
 
-// Gemini AI Chat Endpoint (Formats history array from frontend)
+// Gemini AI Chat Endpoint
 app.post('/api/chat', async (req, res) => {
   try {
     const body = req.body || {};
@@ -164,7 +164,7 @@ app.post('/api/chat', async (req, res) => {
     let systemInstruction = "You are Lumina, an intelligent assistant for MITS Gwalior students. Keep answers concise, helpful, and natural.";
     
     if (req.isAuthenticated() && req.user) {
-      systemInstruction += ` You are currently assisting ${req.user.displayName}, a student in the ${req.user.branch} branch (Semester ${req.user.semester}, Academic Year ${req.user.academicYear}).`;
+      systemInstruction += ` You are currently assisting ${req.user.displayName} (Email: ${req.user.email}), a student in the ${req.user.branch} branch (Semester ${req.user.semester}, Academic Year ${req.user.academicYear}).`;
     }
 
     const response = await ai.models.generateContent({
