@@ -97,7 +97,7 @@ app.get('/auth/google/callback',
   (req, res) => res.redirect('/')
 );
 
-// Protected Root Route: Sends index.html ONLY when logged in
+// Protected Root Route
 app.get('/', (req, res) => {
   if (!req.isAuthenticated()) {
     return res.redirect('/auth/google');
@@ -105,7 +105,6 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// Serve static assets without auto-serving index.html at root
 app.use(express.static('public', { index: false }));
 
 app.get('/api/user', (req, res) => {
@@ -127,7 +126,7 @@ app.get('/login-failed', (req, res) => {
   res.status(403).send('Access Denied: You must sign in with an official MITS college account (@mitsgwl.ac.in or @mitsgwalior.in).');
 });
 
-// Gemini AI Chat Endpoint
+// Gemini AI Chat Endpoint with Grounding & Search Capabilities
 app.post('/api/chat', async (req, res) => {
   try {
     const body = req.body || {};
@@ -163,17 +162,31 @@ app.post('/api/chat', async (req, res) => {
       day: 'numeric'
     });
 
-    let systemInstruction = `Today's date is strictly ${currentDateStr}. You are Lumina, an intelligent assistant for MITS Gwalior students. Keep answers concise, helpful, and natural.`;
+    let systemInstruction = `Today's date is strictly ${currentDateStr}. You are Lumina, the official AI assistant for MITS Gwalior (Madhav Institute of Technology & Science).`;
 
     if (req.isAuthenticated() && req.user) {
-      systemInstruction += ` You are currently assisting authenticated MITS student ${req.user.displayName} (Email ID: ${req.user.email}). The student belongs to the ${req.user.branch} branch (Admitted ${req.user.admissionYear}, currently in Semester ${req.user.semester}, Academic Year ${req.user.academicYear}). You must recognize their email ID, branch, and current semester automatically whenever asked.`;
+      systemInstruction += `
+You are currently assisting authenticated student:
+- Name: ${req.user.displayName}
+- Email: ${req.user.email}
+- Course: B.Tech
+- Branch: ${req.user.branch}
+- Current Semester: Semester ${req.user.semester}
+- Academic Year: Year ${req.user.academicYear} (Admitted ${req.user.admissionYear})
+
+Key Guidelines:
+1. Always tailor academic details, subject listings, schemes, and exam notices specifically to B.Tech ${req.user.branch} Semester ${req.user.semester}.
+2. Use Google Search to fetch active syllabus details, scheme updates, or official PDF links directly from the official portal site: mitsgwalior.in.
+3. Always display document links in clean Markdown link format: [Document Name](https://mitsgwalior.in/path-to-file.pdf) or [Portal Title](https://mitsgwalior.in/...) so students can open official MITS documents directly.
+4. If asked about syllabus or schemes, proactively notify the student about their branch and semester specifics and share the corresponding document link.`;
     }
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3.6-flash',
+      model: 'gemini-2.5-flash',
       contents: geminiContents,
       config: {
-        systemInstruction: systemInstruction
+        systemInstruction: systemInstruction,
+        tools: [{ googleSearch: {} }]
       }
     });
 
