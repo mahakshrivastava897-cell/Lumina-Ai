@@ -8,13 +8,10 @@ const { GoogleGenAI } = require('@google/genai');
 const app = express();
 const port = process.env.PORT || 3000;
 
-// Enable trust proxy for Render reverse proxy HTTPS redirect handling
 app.set('trust proxy', 1);
 
-// Initialize Gemini API Client
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
-// Middleware Setup
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static('public'));
@@ -34,9 +31,11 @@ app.use(passport.session());
 // Academic Metadata Parser
 function parseStudentProfile(email) {
   const handle = email.split('@')[0].toLowerCase();
-  const currentYear = new Date().getFullYear();
-  const currentMonth = new Date().getMonth() + 1;
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const currentMonth = now.getMonth() + 1; // 1 to 12
 
+  // Matches pattern like '23ai123' or '23ai'
   const match = handle.match(/^(\d{2})([a-z]+)/);
 
   let admissionYear = currentYear;
@@ -57,11 +56,9 @@ function parseStudentProfile(email) {
   return { branch, admissionYear, semester, academicYear };
 }
 
-// Passport Serialization
 passport.serializeUser((user, done) => done(null, user));
 passport.deserializeUser((obj, done) => done(null, obj));
 
-// Passport Google OAuth Strategy
 passport.use(new GoogleStrategy({
     clientID: process.env.GOOGLE_CLIENT_ID,
     clientSecret: process.env.GOOGLE_CLIENT_SECRET,
@@ -91,7 +88,7 @@ passport.use(new GoogleStrategy({
   }
 ));
 
-// Root Route Guard - Redirects unauthenticated sessions to Google OAuth
+// Strict Auth Guard - Redirects guests directly to MITS Google OAuth Login
 app.get('/', (req, res, next) => {
   if (!req.isAuthenticated()) {
     return res.redirect('/auth/google');
@@ -99,7 +96,6 @@ app.get('/', (req, res, next) => {
   next();
 });
 
-// Authentication Routes
 app.get('/auth/google',
   passport.authenticate('google', { scope: ['profile', 'email'] })
 );
@@ -120,12 +116,12 @@ app.get('/api/user', (req, res) => {
 app.get('/logout', (req, res, next) => {
   req.logout((err) => {
     if (err) return next(err);
-    res.redirect('/');
+    res.redirect('/auth/google');
   });
 });
 
 app.get('/login-failed', (req, res) => {
-  res.status(403).send('Access Denied: You must sign in with an official MITS account.');
+  res.status(403).send('Access Denied: You must sign in with an official MITS college account (@mitsgwl.ac.in or @mitsgwalior.in).');
 });
 
 // Gemini AI Chat Endpoint
@@ -134,11 +130,8 @@ app.post('/api/chat', async (req, res) => {
     const body = req.body || {};
     let geminiContents = [];
 
-    // Parse session history array sent by index.html
     if (Array.isArray(body.history) && body.history.length > 0) {
       let historyList = [...body.history];
-      
-      // Strip initial bot welcome greeting so contents start with 'user'
       if (historyList.length > 0 && historyList[0].sender === 'bot') {
         historyList.shift();
       }
@@ -149,7 +142,6 @@ app.post('/api/chat', async (req, res) => {
       }));
     }
 
-    // Fallback single prompt parser
     if (geminiContents.length === 0) {
       let userPrompt = body.prompt || body.message || body.contents || body.text || body.query;
       if (userPrompt && typeof userPrompt === 'string' && userPrompt.trim()) {
@@ -161,10 +153,18 @@ app.post('/api/chat', async (req, res) => {
       return res.status(400).json({ error: "Message content cannot be empty." });
     }
 
-    let systemInstruction = "You are Lumina, an intelligent assistant for MITS Gwalior students. Keep answers concise, helpful, and natural.";
-    
+    // Dynamic Date Calculation
+    const currentDateStr = new Date().toLocaleDateString('en-US', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    });
+
+    let systemInstruction = `Today's date is strictly ${currentDateStr}. You are Lumina, an intelligent assistant for MITS Gwalior students. Keep answers concise, helpful, and natural.`;
+
     if (req.isAuthenticated() && req.user) {
-      systemInstruction += ` You are currently assisting ${req.user.displayName} (Email: ${req.user.email}), a student in the ${req.user.branch} branch (Semester ${req.user.semester}, Academic Year ${req.user.academicYear}).`;
+      systemInstruction += ` You are currently assisting authenticated MITS student ${req.user.displayName} (Email ID: ${req.user.email}). The student belongs to the ${req.user.branch} branch (Admitted ${req.user.admissionYear}, currently in Semester ${req.user.semester}, Academic Year ${req.user.academicYear}). You must recognize their email ID, branch, and current semester automatically whenever asked.`;
     }
 
     const response = await ai.models.generateContent({
@@ -174,7 +174,7 @@ app.post('/api/chat', async (req, res) => {
         systemInstruction: systemInstruction
       }
     });
-    
+
     res.json({ text: response.text });
   } catch (error) {
     console.error("Chat Error:", error);
