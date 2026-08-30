@@ -3,7 +3,9 @@ const express = require('express');
 const session = require('express-session');
 const passport = require('passport');
 const GoogleStrategy = require('passport-google-oauth20').Strategy;
-const { GoogleGenAI } = require('@google/genai');
+const Groq = require('groq-sdk');
+const axios = require('axios');
+const cheerio = require('cheerio');
 const path = require('path');
 
 const app = express();
@@ -11,7 +13,8 @@ const port = process.env.PORT || 3000;
 
 app.set('trust proxy', 1);
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+// Initialize Free Groq AI Client
+const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -27,6 +30,28 @@ app.use(session({
 
 app.use(passport.initialize());
 app.use(passport.session());
+
+// Scraping MITS Official Portal for Live Links and Documents
+async function fetchMitsLiveNotices() {
+  try {
+    const { data } = await axios.get('https://mitsgwalior.in', { timeout: 4000 });
+    const $ = cheerio.load(data);
+    let resources = [];
+
+    $('a').each((i, el) => {
+      const text = $(el).text().trim();
+      const href = $(el).attr('href');
+      if (text && href && (href.includes('.pdf') || href.includes('notice') || href.includes('scheme') || href.includes('syllabus'))) {
+        const fullUrl = href.startsWith('http') ? href : `https://mitsgwalior.in/${href.replace(/^\//, '')}`;
+        resources.push(`- [${text}](${fullUrl})`);
+      }
+    });
+
+    return resources.slice(0, 15).join('\n');
+  } catch (err) {
+    return "- Official Portal: [MITS Gwalior Website](https://mitsgwalior.in)";
+  }
+}
 
 // Academic Metadata Parser
 function parseStudentProfile(email) {
@@ -126,11 +151,11 @@ app.get('/login-failed', (req, res) => {
   res.status(403).send('Access Denied: You must sign in with an official MITS college account (@mitsgwl.ac.in or @mitsgwalior.in).');
 });
 
-// Gemini AI Chat Endpoint with Grounding & Search Capabilities
+// High-Speed, Zero-Quota Error Chat Endpoint (Groq + Cheerio Scraper)
 app.post('/api/chat', async (req, res) => {
   try {
     const body = req.body || {};
-    let geminiContents = [];
+    let messages = [];
 
     if (Array.isArray(body.history) && body.history.length > 0) {
       let historyList = [...body.history];
@@ -138,20 +163,20 @@ app.post('/api/chat', async (req, res) => {
         historyList.shift();
       }
 
-      geminiContents = historyList.map(msg => ({
-        role: msg.sender === 'user' ? 'user' : 'model',
-        parts: [{ text: msg.text }]
+      messages = historyList.map(msg => ({
+        role: msg.sender === 'user' ? 'user' : 'assistant',
+        content: msg.text
       }));
     }
 
-    if (geminiContents.length === 0) {
+    if (messages.length === 0) {
       let userPrompt = body.prompt || body.message || body.contents || body.text || body.query;
       if (userPrompt && typeof userPrompt === 'string' && userPrompt.trim()) {
-        geminiContents = [userPrompt.trim()];
+        messages = [{ role: 'user', content: userPrompt.trim() }];
       }
     }
 
-    if (geminiContents.length === 0) {
+    if (messages.length === 0) {
       return res.status(400).json({ error: "Message content cannot be empty." });
     }
 
@@ -162,49 +187,45 @@ app.post('/api/chat', async (req, res) => {
       day: 'numeric'
     });
 
-    let systemInstruction = `Today's date is strictly ${currentDateStr}. You are Lumina, the official AI assistant for MITS Gwalior (Madhav Institute of Technology & Science).`;
+    // Fetch live links directly from mitsgwalior.in
+    const livePortalData = await fetchMitsLiveNotices();
+
+    let systemInstruction = `Today's date is strictly ${currentDateStr}. You are Lumina, the official AI chatbot for MITS Gwalior (Madhav Institute of Technology & Science).
+Available Live MITS Documents & Links:\n${livePortalData}`;
 
     if (req.isAuthenticated() && req.user) {
-      systemInstruction += `
-You are currently assisting authenticated student:
+      systemInstruction += `\n\nActive Student Details:
 - Name: ${req.user.displayName}
 - Email: ${req.user.email}
 - Course: B.Tech
 - Branch: ${req.user.branch}
-- Current Semester: Semester ${req.user.semester}
+- Semester: Semester ${req.user.semester}
 - Academic Year: Year ${req.user.academicYear} (Admitted ${req.user.admissionYear})
 
-Key Guidelines:
-1. Always tailor academic details, subject listings, schemes, and exam notices specifically to B.Tech ${req.user.branch} Semester ${req.user.semester}.
-2. Use Google Search to fetch active syllabus details, scheme updates, or official PDF links directly from the official portal site: mitsgwalior.in.
-3. Always display document links in clean Markdown link format: [Document Name](https://mitsgwalior.in/path-to-file.pdf) or [Portal Title](https://mitsgwalior.in/...) so students can open official MITS documents directly.
-4. If asked about syllabus or schemes, proactively notify the student about their branch and semester specifics and share the corresponding document link.`;
+Guidelines:
+1. Automatically acknowledge their branch (${req.user.branch}) and semester (${req.user.semester}) whenever appropriate.
+2. Provide direct markdown links to official MITS resources listed above.
+3. Keep responses fast, concise, and formatted with markdown.`;
     }
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.6-flash',
-      contents: geminiContents,
-      config: {
-        systemInstruction: systemInstruction,
-        tools: [{ googleSearch: {} }]
-      }
+    // Prepend system instruction to messages list
+    messages.unshift({ role: 'system', content: systemInstruction });
+
+    // Call Groq API (Llama 3.3 70B Model)
+    const completion = await groq.chat.completions.create({
+      messages: messages,
+      model: 'llama-3.3-70b-versatile',
+      temperature: 0.6,
+      max_tokens: 1024,
     });
 
-    res.json({ text: response.text });
+    res.json({ text: completion.choices[0]?.message?.content || "No response generated." });
   } catch (error) {
     console.error("Chat Error:", error);
-    
-    // Handle API Rate Limits / Quota Exhaustion
-    if (error.status === 429 || (error.message && error.message.includes('429'))) {
-      return res.status(200).json({ 
-        text: "⚠️ API rate limit reached. Please wait 1 minute before asking another question." 
-      });
-    }
-
     res.status(500).json({ error: error.message });
   }
 });
 
 app.listen(port, () => {
-  console.log(`Lumina-Ai server running on port ${port}`);
+  console.log(`Lumina-Ai chatbot server running on port ${port}`);
 });
