@@ -4,6 +4,7 @@ const session = require('express-session');
 const passport = require('passport');
 const GoogleStrategy = require('passport-google-oauth20').Strategy;
 const { GoogleGenAI } = require('@google/genai');
+const path = require('path');
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -14,7 +15,6 @@ const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.use(express.static('public'));
 
 app.use(session({
   secret: process.env.SESSION_SECRET || 'lumina_secret_key',
@@ -33,9 +33,8 @@ function parseStudentProfile(email) {
   const handle = email.split('@')[0].toLowerCase();
   const now = new Date();
   const currentYear = now.getFullYear();
-  const currentMonth = now.getMonth() + 1; // 1 to 12
+  const currentMonth = now.getMonth() + 1;
 
-  // Matches pattern like '23ai123' or '23ai'
   const match = handle.match(/^(\d{2})([a-z]+)/);
 
   let admissionYear = currentYear;
@@ -88,14 +87,7 @@ passport.use(new GoogleStrategy({
   }
 ));
 
-// Strict Auth Guard - Redirects guests directly to MITS Google OAuth Login
-app.get('/', (req, res, next) => {
-  if (!req.isAuthenticated()) {
-    return res.redirect('/auth/google');
-  }
-  next();
-});
-
+// Authentication Routes
 app.get('/auth/google',
   passport.authenticate('google', { scope: ['profile', 'email'] })
 );
@@ -104,6 +96,17 @@ app.get('/auth/google/callback',
   passport.authenticate('google', { failureRedirect: '/login-failed' }),
   (req, res) => res.redirect('/')
 );
+
+// Protected Root Route: Sends index.html ONLY when logged in
+app.get('/', (req, res) => {
+  if (!req.isAuthenticated()) {
+    return res.redirect('/auth/google');
+  }
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+// Serve static assets without auto-serving index.html at root
+app.use(express.static('public', { index: false }));
 
 app.get('/api/user', (req, res) => {
   if (req.isAuthenticated()) {
@@ -153,7 +156,6 @@ app.post('/api/chat', async (req, res) => {
       return res.status(400).json({ error: "Message content cannot be empty." });
     }
 
-    // Dynamic Date Calculation
     const currentDateStr = new Date().toLocaleDateString('en-US', {
       weekday: 'long',
       year: 'numeric',
@@ -168,7 +170,7 @@ app.post('/api/chat', async (req, res) => {
     }
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3.6-flash',
+      model: 'gemini-2.5-flash',
       contents: geminiContents,
       config: {
         systemInstruction: systemInstruction
