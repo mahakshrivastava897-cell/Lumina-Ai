@@ -193,6 +193,14 @@ Key Guidelines:
     res.json({ text: response.text });
   } catch (error) {
     console.error("Chat Error:", error);
+    
+    // Handle API Rate Limits / Quota Exhaustion
+    if (error.status === 429 || (error.message && error.message.includes('429'))) {
+      return res.status(200).json({ 
+        text: "⚠️ API rate limit reached. Please wait 1 minute before asking another question." 
+      });
+    }
+
     res.status(500).json({ error: error.message });
   }
 });
